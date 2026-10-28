@@ -1,6 +1,7 @@
 package com.drew.metadata.icc;
 
 import com.drew.imaging.ImageMetadataReader;
+import com.drew.imaging.jpeg.JpegSegmentType;
 import com.drew.lang.ByteArrayReader;
 import com.drew.lang.RandomAccessStreamReader;
 import com.drew.metadata.Metadata;
@@ -12,11 +13,24 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.Collections;
 
 import static org.junit.Assert.*;
 
 public class IccReaderBoundsTest
 {
+    @Test
+    public void rejectsOversizedJpegProfileBeforeAssembly()
+    {
+        byte[] segment = new byte[65533];
+        System.arraycopy("ICC_PROFILE".getBytes(), 0, segment, 0, 11);
+        Metadata metadata = new Metadata();
+
+        new IccReader().readJpegSegments(Collections.nCopies(257, segment), metadata, JpegSegmentType.APP2);
+
+        assertTrue(error(metadata).contains("16 MiB size limit"));
+    }
+
     @Test
     public void rejectsInvalidProfileSizesWithoutReadingBeyondHeader() throws Exception
     {

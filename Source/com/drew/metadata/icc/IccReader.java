@@ -32,8 +32,10 @@ import com.drew.metadata.Metadata;
 import com.drew.metadata.MetadataReader;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -54,6 +56,7 @@ import java.util.Map;
 public class IccReader implements JpegSegmentMetadataReader, MetadataReader
 {
     public static final String JPEG_SEGMENT_PREAMBLE = "ICC_PROFILE";
+    private static final int JPEG_SEGMENT_PREAMBLE_LENGTH = 14;
     private static final int MAX_PROFILE_BYTE_COUNT = 16 * 1024 * 1024;
     private static final int MAX_TAG_COUNT = 4096;
 
@@ -68,31 +71,42 @@ public class IccReader implements JpegSegmentMetadataReader, MetadataReader
         final int preambleLength = JPEG_SEGMENT_PREAMBLE.length();
 
         // ICC data can be spread across multiple JPEG segments.
-        // We concat them together in this buffer for later processing.
-        byte[] buffer = null;
+        List<byte[]> profileSegments = new ArrayList<byte[]>();
+        int profileByteCount = 0;
 
         for (byte[] segmentBytes : segments) {
             // Skip any segments that do not contain the required preamble
             if (segmentBytes.length < preambleLength || !JPEG_SEGMENT_PREAMBLE.equalsIgnoreCase(new String(segmentBytes, 0, preambleLength)))
                 continue;
+            if (segmentBytes.length < JPEG_SEGMENT_PREAMBLE_LENGTH) {
+                IccDirectory directory = new IccDirectory();
+                directory.addError("ICC JPEG segment is shorter than its header");
+                metadata.addDirectory(directory);
+                return;
+            }
 
             // NOTE we ignore three bytes here -- are they useful for anything?
-
-            // Grow the buffer
-            if (buffer == null) {
-                buffer = new byte[segmentBytes.length - 14];
-                // skip the first 14 bytes
-                System.arraycopy(segmentBytes, 14, buffer, 0, segmentBytes.length - 14);
-            } else {
-                byte[] newBuffer = new byte[buffer.length + segmentBytes.length - 14];
-                System.arraycopy(buffer, 0, newBuffer, 0, buffer.length);
-                System.arraycopy(segmentBytes, 14, newBuffer, buffer.length, segmentBytes.length - 14);
-                buffer = newBuffer;
+            int segmentLength = segmentBytes.length - JPEG_SEGMENT_PREAMBLE_LENGTH;
+            if (segmentLength > MAX_PROFILE_BYTE_COUNT - profileByteCount) {
+                IccDirectory directory = new IccDirectory();
+                directory.addError("ICC profile exceeds the 16 MiB size limit");
+                metadata.addDirectory(directory);
+                return;
             }
+            profileSegments.add(segmentBytes);
+            profileByteCount += segmentLength;
         }
 
-        if (buffer != null)
+        if (!profileSegments.isEmpty()) {
+            byte[] buffer = new byte[profileByteCount];
+            int offset = 0;
+            for (byte[] segmentBytes : profileSegments) {
+                int segmentLength = segmentBytes.length - JPEG_SEGMENT_PREAMBLE_LENGTH;
+                System.arraycopy(segmentBytes, JPEG_SEGMENT_PREAMBLE_LENGTH, buffer, offset, segmentLength);
+                offset += segmentLength;
+            }
             extract(new ByteArrayReader(buffer), metadata);
+        }
     }
 
     public void extract(@NotNull final RandomAccessReader reader, @NotNull final Metadata metadata)

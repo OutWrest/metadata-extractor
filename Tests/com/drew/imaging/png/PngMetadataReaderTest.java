@@ -215,6 +215,18 @@ public class PngMetadataReaderTest
         assertCompressedText(PngChunkType.iTXt, "Compressed \u03c0");
     }
 
+    @Test
+    public void testCompressedTextDecompressionLimit() throws Exception
+    {
+        byte[] compressed = compress(new byte[16 * 1024 * 1024 + 1]);
+        for (PngChunkType chunkType : new PngChunkType[]{PngChunkType.zTXt, PngChunkType.iTXt}) {
+            Metadata metadata = readCompressedChunk(chunkType, compressed);
+            assertTrue(chunkType.toString(), metadata.hasErrors());
+            PngDirectory[] directories = metadata.getDirectoriesOfType(PngDirectory.class).toArray(new PngDirectory[0]);
+            assertTrue(directories[1].getErrors().iterator().next().contains("16 MiB limit"));
+        }
+    }
+
     private static void assertCompressedText(PngChunkType chunkType, String text) throws Exception
     {
         byte[] bytes = text.getBytes(chunkType.equals(PngChunkType.iTXt) ? Charsets.UTF_8 : Charsets.ISO_8859_1);

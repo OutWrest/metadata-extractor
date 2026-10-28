@@ -46,6 +46,7 @@ import java.util.zip.InflaterInputStream;
  */
 public class PngMetadataReader
 {
+    private static final int MAX_DECOMPRESSED_TEXT_BYTES = 16 * 1024 * 1024;
     private static Set<PngChunkType> _desiredChunkTypes;
 
     /**
@@ -234,9 +235,9 @@ public class PngMetadataReader
             int bytesLeft = bytes.length - (keywordsv.getBytes().length + 1 + 1);
             byte[] textBytes = null;
             if (compressionMethod == 0) {
-                try (InflaterInputStream inflateStream = new InflaterInputStream(new ByteArrayInputStream(bytes, bytes.length - bytesLeft, bytesLeft))) {
-                    textBytes = StreamUtil.readAllBytes(inflateStream);
-                } catch(java.util.zip.ZipException zex) {
+                try {
+                    textBytes = inflateText(bytes, bytesLeft);
+                } catch(IOException zex) {
                     PngDirectory directory = new PngDirectory(PngChunkType.zTXt);
                     directory.addError(String.format("Exception decompressing PNG zTXt chunk with keyword \"%s\": %s", keyword, zex.getMessage()));
                     metadata.addDirectory(directory);
@@ -287,9 +288,9 @@ public class PngMetadataReader
                 textBytes = reader.getNullTerminatedBytes(bytesLeft, false);
             } else if (compressionFlag == 1) {
                 if (compressionMethod == 0) {
-                    try (InflaterInputStream inflateStream = new InflaterInputStream(new ByteArrayInputStream(bytes, bytes.length - bytesLeft, bytesLeft))) {
-                        textBytes = StreamUtil.readAllBytes(inflateStream);
-                    } catch(java.util.zip.ZipException zex) {
+                    try {
+                        textBytes = inflateText(bytes, bytesLeft);
+                    } catch(IOException zex) {
                         PngDirectory directory = new PngDirectory(PngChunkType.iTXt);
                         directory.addError(String.format("Exception decompressing PNG iTXt chunk with keyword \"%s\": %s", keyword, zex.getMessage()));
                         metadata.addDirectory(directory);
@@ -372,6 +373,21 @@ public class PngMetadataReader
                 metadata.addDirectory(directory);
             }
         }
+    }
+
+    private static byte[] inflateText(byte[] bytes, int bytesLeft) throws IOException
+    {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        byte[] buffer = new byte[1024];
+        try (InflaterInputStream stream = new InflaterInputStream(new ByteArrayInputStream(bytes, bytes.length - bytesLeft, bytesLeft))) {
+            int bytesRead;
+            while ((bytesRead = stream.read(buffer)) != -1) {
+                if (output.size() + bytesRead > MAX_DECOMPRESSED_TEXT_BYTES)
+                    throw new IOException("Decompressed PNG text exceeds the 16 MiB limit");
+                output.write(buffer, 0, bytesRead);
+            }
+        }
+        return output.toByteArray();
     }
 
     /**
